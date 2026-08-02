@@ -1,11 +1,12 @@
 import os
+import sys
 import asyncio
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatMemberStatus
 
-# Токен бота (тестовый)
+# Токен бота
 BOT_TOKEN = "8849435803:AAGCUhcFynX9EtPPMQyTILR0puMn2XgMeJI"
 
 # Время неактивности (3 дня)
@@ -31,7 +32,7 @@ async def check_inactive_users():
     print("🔄 Запущена проверка неактивных пользователей")
     
     while True:
-        await asyncio.sleep(3600)  # Проверка каждый час
+        await asyncio.sleep(60)  # Проверка каждую минуту (для теста)
         
         try:
             print(f"[{datetime.now()}] Начинаю проверку групп...")
@@ -80,7 +81,6 @@ async def check_inactive_users():
                                     print(f"❌ Ошибка при кике {user_id}: {e}")
                         else:
                             # Если пользователь не писал с момента запуска бота
-                            # Можно добавить логику проверки даты вступления
                             pass
                             
         except Exception as e:
@@ -158,7 +158,15 @@ async def main():
     asyncio.create_task(check_inactive_users())
     
     # Держим бота активным
-    await asyncio.Event().wait()
+    while True:
+        await asyncio.sleep(1)
 
 if __name__ == "__main__":
-    app.run(main())
+    # Фикс для Python 3.14
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    loop.run_until_complete(main())
