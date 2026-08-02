@@ -4,17 +4,17 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
-# ============= КОНФИГ =============
+# ===== КОНФИГ =====
 BOT_TOKEN = "8849435803:AAGCUhcFynX9EtPPMQyTILR0puMn2XgMeJI"
 OWNER_ID = 8131755675
 INACTIVE_DAYS = 3
 INACTIVE_SECONDS = INACTIVE_DAYS * 24 * 60 * 60
 
 app = Client("kick_bot", bot_token=BOT_TOKEN)
-last_message_time = {}
+last_msg = {}
 group_links = {}
 
-# ============= ОСНОВНЫЕ ФУНКЦИИ =============
+# ===== ОСНОВНЫЕ ФУНКЦИИ =====
 
 @app.on_chat_member_updated()
 async def on_member_update(client, chat_member_updated):
@@ -44,11 +44,11 @@ async def on_member_update(client, chat_member_updated):
         )
 
 @app.on_message(filters.group & ~filters.service)
-async def track_messages(client, message: Message):
+async def track(client, message):
     if message.from_user and not message.from_user.is_bot:
-        last_message_time[message.from_user.id] = datetime.now()
+        last_msg[message.from_user.id] = datetime.now()
 
-async def check_inactive_users():
+async def check_inactive():
     while True:
         await asyncio.sleep(3600)
         try:
@@ -58,267 +58,74 @@ async def check_inactive_users():
                     async for member in app.get_chat_members(chat_id):
                         if member.user.is_bot:
                             continue
-                        # 0=создатель, 1=админ, 2=участник
-                        if member.status in [0, 1]:  # пропускаем админов и создателя
+                        if member.status in ["administrator", "creator"]:
                             continue
-                        last_seen = last_message_time.get(member.user.id)
-                        if last_seen:
-                            if (datetime.now() - last_seen).total_seconds() > INACTIVE_SECONDS:
+                        last = last_msg.get(member.user.id)
+                        if last:
+                            if (datetime.now() - last).total_seconds() > INACTIVE_SECONDS:
                                 try:
                                     await app.ban_chat_member(chat_id, member.user.id)
                                     await app.unban_chat_member(chat_id, member.user.id)
                                     mention = member.user.mention or member.user.first_name
-                                    await app.send_message(chat_id, f"🔨 Пользователь {mention} не писал 3 дня. Кикаю его.")
-                                    if member.user.id in last_message_time:
-                                        del last_message_time[member.user.id]
+                                    await app.send_message(chat_id, f"🔨 {mention} не писал 3 дня. Кикнут.")
+                                    if member.user.id in last_msg:
+                                        del last_msg[member.user.id]
                                 except:
                                     pass
         except:
             pass
 
-# ============= ИНЛАЙН-МЕНЮ =============
+# ===== МЕНЮ В ЛС =====
 
 @app.on_message(filters.command("меню") & filters.private & filters.user(OWNER_ID))
-async def main_menu(client, message: Message):
+async def menu(client, message):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Список групп", callback_data="list_groups")],
         [InlineKeyboardButton("🔗 Получить ссылку", callback_data="get_link")],
-        [InlineKeyboardButton("📊 Статистика", callback_data="stats_menu")]
+        [InlineKeyboardButton("📊 Статистика", callback_data="stats")]
     ])
-    await message.reply("🔐 **Панель управления**\n\nВыберите действие:", reply_markup=keyboard)
+    await message.reply("🔐 **Панель управления**", reply_markup=keyboard)
 
 @app.on_callback_query(filters.user(OWNER_ID))
-async def handle_callbacks(client, callback: CallbackQuery):
+async def handle(callback):
     data = callback.data
     
     if data == "list_groups":
         await show_groups(callback)
     elif data == "get_link":
-        await get_group_link(callback)
-    elif data == "stats_menu":
-        await show_stats_menu(callback)
+        await get_link(callback)
+    elif data == "stats":
+        await show_stats(callback)
     elif data.startswith("group_"):
-        chat_id = int(data.split("_")[1])
-        await show_group_menu(callback, chat_id)
+        await group_menu(callback, int(data.split("_")[1]))
+    elif data.startswith("kick_"):
+        await kick_menu(callback, int(data.split("_")[1]))
     elif data.startswith("kick_user_"):
         parts = data.split("_")
-        chat_id = int(parts[1])
-        user_id = int(parts[2])
-        await kick_user_by_id(callback, chat_id, user_id)
-    elif data.startswith("change_name_"):
-        chat_id = int(data.split("_")[2])
-        await ask_new_name(callback, chat_id)
-    elif data.startswith("change_photo_"):
-        chat_id = int(data.split("_")[2])
-        await ask_new_photo(callback, chat_id)
+        await kick_user(callback, int(parts[1]), int(parts[2]))
+    elif data.startswith("name_"):
+        await change_name(callback, int(data.split("_")[1]))
+    elif data.startswith("photo_"):
+        await change_photo(callback, int(data.split("_")[1]))
     elif data.startswith("promote_"):
-        chat_id = int(data.split("_")[1])
-        await promote_user_menu(callback, chat_id)
-    elif data == "back_to_groups":
+        await promote_menu(callback, int(data.split("_")[1]))
+    elif data.startswith("promote_user_"):
+        parts = data.split("_")
+        await promote_user(callback, int(parts[1]), int(parts[2]))
+    elif data == "back_groups":
         await show_groups(callback)
-    elif data == "back_to_menu":
+    elif data == "back_menu":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 Список групп", callback_data="list_groups")],
             [InlineKeyboardButton("🔗 Получить ссылку", callback_data="get_link")],
-            [InlineKeyboardButton("📊 Статистика", callback_data="stats_menu")]
+            [InlineKeyboardButton("📊 Статистика", callback_data="stats")]
         ])
-        await callback.message.edit_text("🔐 **Панель управления**\n\nВыберите действие:", reply_markup=keyboard)
+        await callback.message.edit_text("🔐 **Панель управления**", reply_markup=keyboard)
         await callback.answer()
 
-# ============= СПИСОК ГРУПП =============
+# ===== СПИСОК ГРУПП =====
 
-async def show_groups(callback: CallbackQuery):
-    groups = []
-    async for dialog in app.get_dialogs():
-        if dialog.chat.type in ["group", "supergroup"]:
-            groups.append(dialog.chat)
-    
-    if not groups:
-        await callback.message.edit_text("❌ Вы не состоите ни в одной группе с ботом.")
-        await callback.answer()
-        return
-    
-    keyboard = []
-    for chat in groups[:10]:
-        title = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
-        keyboard.append([InlineKeyboardButton(f"📁 {title}", callback_data=f"group_{chat.id}")])
-    
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
-    await callback.message.edit_text(f"📋 **Ваши группы ({len(groups)})**\n\nВыберите группу:", reply_markup=InlineKeyboardMarkup(keyboard))
-    await callback.answer()
-
-# ============= МЕНЮ ГРУППЫ =============
-
-async def show_group_menu(callback: CallbackQuery, chat_id: int):
-    try:
-        chat = await app.get_chat(chat_id)
-        members = 0
-        async for _ in app.get_chat_members(chat_id):
-            members += 1
-    except:
-        await callback.answer("❌ Нет доступа к группе", show_alert=True)
-        return
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 Кик участника", callback_data=f"kick_{chat_id}")],
-        [InlineKeyboardButton("✏️ Изменить название", callback_data=f"change_name_{chat_id}")],
-        [InlineKeyboardButton("🖼️ Изменить фото", callback_data=f"change_photo_{chat_id}")],
-        [InlineKeyboardButton("⭐ Выдать права", callback_data=f"promote_{chat_id}")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_groups")]
-    ])
-    
-    await callback.message.edit_text(
-        f"📁 **{chat.title}**\n\n👥 Участников: {members}\n🆔 ID: {chat_id}\n\nВыберите действие:",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
-# ============= КИК УЧАСТНИКА =============
-
-@app.on_callback_query(filters.user(OWNER_ID) & filters.regex(r"^kick_(\d+)$"))
-async def kick_menu(callback: CallbackQuery):
-    chat_id = int(callback.data.split("_")[1])
-    keyboard = []
-    count = 0
-    
-    try:
-        async for member in app.get_chat_members(chat_id):
-            if count >= 20:
-                break
-            if member.user.is_bot:
-                continue
-            if member.status in [0, 1]:  # создатель или админ
-                continue
-            
-            user = member.user
-            name = user.first_name[:15] + "..." if len(user.first_name) > 15 else user.first_name
-            username = f"@{user.username}" if user.username else f"ID:{user.id}"
-            keyboard.append([InlineKeyboardButton(f"❌ {name} ({username})", callback_data=f"kick_user_{chat_id}_{user.id}")])
-            count += 1
-        
-        if not keyboard:
-            await callback.message.edit_text("✅ Нет обычных пользователей.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")]]))
-            await callback.answer()
-            return
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")])
-        await callback.message.edit_text("👥 **Выберите пользователя для кика:**", reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка", show_alert=True)
-
-async def kick_user_by_id(callback: CallbackQuery, chat_id: int, user_id: int):
-    try:
-        bot = await app.get_me()
-        bot_member = await app.get_chat_member(chat_id, bot.id)
-        if not bot_member.can_restrict_members:
-            await callback.answer("❌ Нет прав на кик!", show_alert=True)
-            return
-        
-        await app.ban_chat_member(chat_id, user_id)
-        await app.unban_chat_member(chat_id, user_id)
-        await callback.answer("✅ Пользователь кикнут!", show_alert=True)
-        await show_group_menu(callback, chat_id)
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка", show_alert=True)
-
-# ============= ИЗМЕНЕНИЕ НАЗВАНИЯ =============
-
-async def ask_new_name(callback: CallbackQuery, chat_id: int):
-    await callback.message.edit_text(
-        "✏️ **Введите новое название группы:**\n\nОтправьте текст в чат.\nДля отмены нажмите кнопку.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data=f"group_{chat_id}")]])
-    )
-    await callback.answer()
-    
-    @app.on_message(filters.private & filters.user(OWNER_ID) & filters.text)
-    async def get_name(client, message):
-        if message.text and not message.text.startswith("/"):
-            try:
-                await app.set_chat_title(chat_id, message.text)
-                await message.reply(f"✅ Название изменено на: {message.text}")
-                await show_group_menu(callback, chat_id)
-            except Exception as e:
-                await message.reply(f"❌ Ошибка: {e}")
-            app.remove_handler(get_name)
-
-# ============= ИЗМЕНЕНИЕ ФОТО =============
-
-async def ask_new_photo(callback: CallbackQuery, chat_id: int):
-    await callback.message.edit_text(
-        "🖼️ **Отправьте новое фото для группы:**\n\nПришлите фото в чат.\nДля отмены нажмите кнопку.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data=f"group_{chat_id}")]])
-    )
-    await callback.answer()
-    
-    @app.on_message(filters.private & filters.user(OWNER_ID) & filters.photo)
-    async def get_photo(client, message):
-        try:
-            photo = await message.download()
-            await app.set_chat_photo(chat_id, photo)
-            os.remove(photo)
-            await message.reply("✅ Фото обновлено!")
-            await show_group_menu(callback, chat_id)
-        except Exception as e:
-            await message.reply(f"❌ Ошибка: {e}")
-        app.remove_handler(get_photo)
-
-# ============= ВЫДАЧА ПРАВ =============
-
-@app.on_callback_query(filters.user(OWNER_ID) & filters.regex(r"^promote_(\d+)$"))
-async def promote_menu(callback: CallbackQuery):
-    chat_id = int(callback.data.split("_")[1])
-    keyboard = []
-    count = 0
-    
-    try:
-        async for member in app.get_chat_members(chat_id):
-            if count >= 20:
-                break
-            if member.user.is_bot:
-                continue
-            if member.status in [0, 1]:  # создатель или админ
-                continue
-            
-            user = member.user
-            name = user.first_name[:15] + "..." if len(user.first_name) > 15 else user.first_name
-            keyboard.append([InlineKeyboardButton(f"⭐ {name}", callback_data=f"promote_user_{chat_id}_{user.id}")])
-            count += 1
-        
-        if not keyboard:
-            await callback.message.edit_text("Нет пользователей.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")]]))
-            await callback.answer()
-            return
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")])
-        await callback.message.edit_text("⭐ **Выберите пользователя:**", reply_markup=InlineKeyboardMarkup(keyboard))
-    except:
-        await callback.answer("❌ Ошибка", show_alert=True)
-
-@app.on_callback_query(filters.user(OWNER_ID) & filters.regex(r"^promote_user_(\d+)_(\d+)$"))
-async def promote_user(callback: CallbackQuery):
-    parts = callback.data.split("_")
-    chat_id = int(parts[1])
-    user_id = int(parts[2])
-    
-    try:
-        await app.promote_chat_member(
-            chat_id, user_id,
-            can_manage_chat=True,
-            can_delete_messages=True,
-            can_restrict_members=True,
-            can_promote_members=False,
-            can_change_info=True,
-            can_invite_users=True,
-            can_pin_messages=True
-        )
-        await callback.answer("✅ Права выданы!", show_alert=True)
-        await show_group_menu(callback, chat_id)
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка", show_alert=True)
-
-# ============= ССЫЛКИ =============
-
-async def get_group_link(callback: CallbackQuery):
+async def show_groups(callback):
     groups = []
     async for dialog in app.get_dialogs():
         if dialog.chat.type in ["group", "supergroup"]:
@@ -332,42 +139,217 @@ async def get_group_link(callback: CallbackQuery):
     keyboard = []
     for chat in groups[:10]:
         title = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
-        keyboard.append([InlineKeyboardButton(f"🔗 {title}", callback_data=f"gen_link_{chat.id}")])
+        keyboard.append([InlineKeyboardButton(f"📁 {title}", callback_data=f"group_{chat.id}")])
     
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
-    await callback.message.edit_text("🔗 **Выберите группу:**", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_menu")])
+    await callback.message.edit_text(f"📋 **Группы ({len(groups)})**", reply_markup=InlineKeyboardMarkup(keyboard))
     await callback.answer()
 
-@app.on_callback_query(filters.user(OWNER_ID) & filters.regex(r"^gen_link_(\d+)$"))
-async def generate_link(client, callback: CallbackQuery):
-    chat_id = int(callback.data.split("_")[2])
+# ===== МЕНЮ ГРУППЫ =====
+
+async def group_menu(callback, chat_id):
+    try:
+        chat = await app.get_chat(chat_id)
+        members = 0
+        async for _ in app.get_chat_members(chat_id):
+            members += 1
+    except:
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👥 Кик участника", callback_data=f"kick_{chat_id}")],
+        [InlineKeyboardButton("✏️ Название", callback_data=f"name_{chat_id}")],
+        [InlineKeyboardButton("🖼️ Фото", callback_data=f"photo_{chat_id}")],
+        [InlineKeyboardButton("⭐ Выдать права", callback_data=f"promote_{chat_id}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_groups")]
+    ])
+    
+    await callback.message.edit_text(
+        f"📁 **{chat.title}**\n👥 {members} участников\nID: {chat_id}",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+# ===== КИК =====
+
+async def kick_menu(callback, chat_id):
+    keyboard = []
+    count = 0
+    
+    try:
+        async for member in app.get_chat_members(chat_id):
+            if count >= 20:
+                break
+            if member.user.is_bot or member.status in ["administrator", "creator"]:
+                continue
+            
+            user = member.user
+            name = user.first_name[:15]
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"❌ {name}",
+                    callback_data=f"kick_user_{chat_id}_{user.id}"
+                )
+            ])
+            count += 1
+        
+        if not keyboard:
+            await callback.message.edit_text("✅ Нет обычных пользователей.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")]]))
+            await callback.answer()
+            return
+        
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")])
+        await callback.message.edit_text("👥 **Кого кикнуть?**", reply_markup=InlineKeyboardMarkup(keyboard))
+    except:
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+async def kick_user(callback, chat_id, user_id):
+    try:
+        await app.ban_chat_member(chat_id, user_id)
+        await app.unban_chat_member(chat_id, user_id)
+        await callback.answer("✅ Кикнут!", show_alert=True)
+        await group_menu(callback, chat_id)
+    except:
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+# ===== НАЗВАНИЕ =====
+
+async def change_name(callback, chat_id):
+    await callback.message.edit_text(
+        "✏️ **Введи новое название**",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data=f"group_{chat_id}")]])
+    )
+    await callback.answer()
+    
+    @app.on_message(filters.private & filters.user(OWNER_ID) & filters.text)
+    async def get_name(client, message):
+        if message.text and not message.text.startswith("/"):
+            try:
+                await app.set_chat_title(chat_id, message.text)
+                await message.reply(f"✅ Название изменено")
+                await group_menu(callback, chat_id)
+            except:
+                await message.reply("❌ Ошибка")
+            app.remove_handler(get_name)
+
+# ===== ФОТО =====
+
+async def change_photo(callback, chat_id):
+    await callback.message.edit_text(
+        "🖼️ **Отправь фото**",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Отмена", callback_data=f"group_{chat_id}")]])
+    )
+    await callback.answer()
+    
+    @app.on_message(filters.private & filters.user(OWNER_ID) & filters.photo)
+    async def get_photo(client, message):
+        try:
+            photo = await message.download()
+            await app.set_chat_photo(chat_id, photo)
+            os.remove(photo)
+            await message.reply("✅ Фото обновлено")
+            await group_menu(callback, chat_id)
+        except:
+            await message.reply("❌ Ошибка")
+        app.remove_handler(get_photo)
+
+# ===== ПРАВА =====
+
+async def promote_menu(callback, chat_id):
+    keyboard = []
+    count = 0
+    
+    try:
+        async for member in app.get_chat_members(chat_id):
+            if count >= 20:
+                break
+            if member.user.is_bot or member.status in ["administrator", "creator"]:
+                continue
+            
+            user = member.user
+            name = user.first_name[:15]
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"⭐ {name}",
+                    callback_data=f"promote_user_{chat_id}_{user.id}"
+                )
+            ])
+            count += 1
+        
+        if not keyboard:
+            await callback.message.edit_text("Нет пользователей.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")]]))
+            await callback.answer()
+            return
+        
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")])
+        await callback.message.edit_text("⭐ **Кому выдать права?**", reply_markup=InlineKeyboardMarkup(keyboard))
+    except:
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+async def promote_user(callback, chat_id, user_id):
+    try:
+        await app.promote_chat_member(
+            chat_id, user_id,
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_restrict_members=True,
+            can_change_info=True,
+            can_invite_users=True,
+            can_pin_messages=True
+        )
+        await callback.answer("✅ Права выданы!", show_alert=True)
+        await group_menu(callback, chat_id)
+    except:
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+# ===== ССЫЛКА =====
+
+async def get_link(callback):
+    groups = []
+    async for dialog in app.get_dialogs():
+        if dialog.chat.type in ["group", "supergroup"]:
+            groups.append(dialog.chat)
+    
+    if not groups:
+        await callback.message.edit_text("❌ Нет групп.")
+        await callback.answer()
+        return
+    
+    keyboard = []
+    for chat in groups[:10]:
+        title = chat.title[:20] + "..."
+        keyboard.append([InlineKeyboardButton(f"🔗 {title}", callback_data=f"genlink_{chat.id}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_menu")])
+    await callback.message.edit_text("🔗 **Выбери группу**", reply_markup=InlineKeyboardMarkup(keyboard))
+    await callback.answer()
+
+@app.on_callback_query(filters.user(OWNER_ID) & filters.regex(r"^genlink_(\d+)$"))
+async def generate_link(callback):
+    chat_id = int(callback.data.split("_")[1])
     try:
         link = await app.create_chat_invite_link(chat_id, member_limit=1)
-        group_links[chat_id] = {"link": link.invite_link, "time": datetime.now()}
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")]
-        ])
         await callback.message.edit_text(
-            f"🔗 **Ссылка:**\n\n`{link.invite_link}`\n\n⏳ Действительна 10 минут.\n👤 Только для одного пользователя.",
-            reply_markup=keyboard
+            f"🔗 **Ссылка:**\n`{link.invite_link}`\n\n⏳ 10 минут\n👤 1 пользователь",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data=f"group_{chat_id}")]])
         )
         await callback.answer()
-        asyncio.create_task(delete_link_after(chat_id))
-    except Exception as e:
-        await callback.answer(f"❌ Ошибка", show_alert=True)
+        asyncio.create_task(del_link(chat_id))
+    except:
+        await callback.answer("❌ Ошибка", show_alert=True)
 
-async def delete_link_after(chat_id: int):
+async def del_link(chat_id):
     await asyncio.sleep(600)
     if chat_id in group_links:
         del group_links[chat_id]
 
-# ============= СТАТИСТИКА =============
+# ===== СТАТИСТИКА =====
 
-async def show_stats_menu(callback: CallbackQuery):
+async def show_stats(callback):
     total_groups = 0
     total_users = 0
-    inactive_users = 0
+    inactive = 0
     
     async for dialog in app.get_dialogs():
         if dialog.chat.type in ["group", "supergroup"]:
@@ -375,26 +357,23 @@ async def show_stats_menu(callback: CallbackQuery):
             async for member in app.get_chat_members(dialog.chat.id):
                 if not member.user.is_bot:
                     total_users += 1
-                    last_seen = last_message_time.get(member.user.id)
-                    if last_seen and (datetime.now() - last_seen).total_seconds() > INACTIVE_SECONDS:
-                        inactive_users += 1
+                    last = last_msg.get(member.user.id)
+                    if last and (datetime.now() - last).total_seconds() > INACTIVE_SECONDS:
+                        inactive += 1
     
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]])
     await callback.message.edit_text(
-        f"📊 **Общая статистика**\n\n📁 Групп: {total_groups}\n👥 Всего: {total_users}\n⏰ Неактивных: {inactive_users}\n🟢 Активных: {total_users - inactive_users}",
-        reply_markup=keyboard
+        f"📊 **Статистика**\n\n📁 Групп: {total_groups}\n👥 Всего: {total_users}\n🔴 Неактивных: {inactive}\n🟢 Активных: {total_users - inactive}",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="back_menu")]])
     )
     await callback.answer()
 
-# ============= ЗАПУСК =============
+# ===== ЗАПУСК =====
 
 async def main():
-    print("🤖 Kicker Inactiver запущен!")
-    print(f"👤 Владелец: {OWNER_ID}")
+    print("🤖 Бот запущен")
     await app.start()
-    print("✅ Бот готов!")
-    print("💬 Напиши /меню в ЛС")
-    asyncio.create_task(check_inactive_users())
+    print("✅ Готов! /меню в ЛС")
+    asyncio.create_task(check_inactive())
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
