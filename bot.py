@@ -2,37 +2,25 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 from pyrogram import Client, filters
-from pyrogram.types import (
-    Message, InlineKeyboardMarkup, InlineKeyboardButton,
-    CallbackQuery, ChatPermissions
-)
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.enums import ChatMemberStatus
 
-# ПАТЧ ДЛЯ PYTHON 3.14
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-# Токен бота
+# ТОЛЬКО ТОКЕН БОТА!
 BOT_TOKEN = "8849435803:AAGCUhcFynX9EtPPMQyTILR0puMn2XgMeJI"
 
-# ВАШ ID
+# Ваш ID
 OWNER_ID = 8131755675
 
 # Время неактивности (3 дня)
 INACTIVE_DAYS = 3
 INACTIVE_SECONDS = INACTIVE_DAYS * 24 * 60 * 60
 
+# Создаём клиент ТОЛЬКО с токеном!
 app = Client("kick_inactive_bot", bot_token=BOT_TOKEN)
 
 # Хранилища
 last_message_time = {}
-group_links = {}  # {chat_id: {"link": ссылка, "time": время_создания}}
+group_links = {}
 
 # ============= ОСНОВНЫЕ ФУНКЦИИ =============
 
@@ -143,8 +131,6 @@ async def main_menu(client, message: Message):
 async def handle_callbacks(client, callback: CallbackQuery):
     """Обработка всех кнопок"""
     data = callback.data
-    chat_id = callback.message.chat.id
-    user_id = callback.from_user.id
     
     if data == "list_groups":
         await show_groups(callback)
@@ -212,7 +198,7 @@ async def show_groups(callback: CallbackQuery):
         return
     
     keyboard = []
-    for chat in groups[:10]:  # Максимум 10 групп
+    for chat in groups[:10]:
         title = chat.title[:20] + "..." if len(chat.title) > 20 else chat.title
         keyboard.append([
             InlineKeyboardButton(
@@ -268,7 +254,7 @@ async def kick_user_menu(callback: CallbackQuery, chat_id: int):
     
     try:
         async for member in app.get_chat_members(chat_id):
-            if count >= 20:  # Максимум 20 пользователей
+            if count >= 20:
                 break
                 
             if member.user.is_bot:
@@ -307,12 +293,10 @@ async def kick_user_menu(callback: CallbackQuery, chat_id: int):
         
     except Exception as e:
         await callback.answer(f"❌ Ошибка: {str(e)[:50]}", show_alert=True)
-        await callback.answer()
 
 async def kick_user_by_id(callback: CallbackQuery, chat_id: int, user_id: int):
     """Кикает пользователя по ID"""
     try:
-        # Проверяем права бота
         bot = await app.get_me()
         bot_member = await app.get_chat_member(chat_id, bot.id)
         if not bot_member.can_restrict_members:
@@ -323,8 +307,6 @@ async def kick_user_by_id(callback: CallbackQuery, chat_id: int, user_id: int):
         await app.unban_chat_member(chat_id, user_id)
         
         await callback.answer("✅ Пользователь кикнут!", show_alert=True)
-        
-        # Обновляем меню
         await show_group_menu(callback, chat_id)
         
     except Exception as e:
@@ -344,28 +326,16 @@ async def ask_new_name(callback: CallbackQuery, chat_id: int):
     )
     await callback.answer()
     
-    # Ожидаем ответ
-    @app.on_message(filters.private & filters.user(OWNER_ID))
+    @app.on_message(filters.private & filters.user(OWNER_ID) & filters.text)
     async def get_new_name(client, message):
         if message.text and not message.text.startswith("/"):
             try:
                 await app.set_chat_title(chat_id, message.text)
                 await message.reply(f"✅ Название изменено на: {message.text}")
-                
-                # Возвращаем в меню
-                await show_group_menu(
-                    CallbackQuery(
-                        id="tmp",
-                        from_user=message.from_user,
-                        message=message,
-                        chat_instance="0",
-                        data=""
-                    ), chat_id
-                )
+                await show_group_menu(callback, chat_id)
             except Exception as e:
                 await message.reply(f"❌ Ошибка: {e}")
             
-            # Отключаем обработчик
             app.remove_handler(get_new_name)
 
 # ============= ИЗМЕНЕНИЕ ФОТО =============
@@ -382,7 +352,6 @@ async def ask_new_photo(callback: CallbackQuery, chat_id: int):
     )
     await callback.answer()
     
-    # Ожидаем фото
     @app.on_message(filters.private & filters.user(OWNER_ID) & filters.photo)
     async def get_new_photo(client, message):
         try:
@@ -390,16 +359,7 @@ async def ask_new_photo(callback: CallbackQuery, chat_id: int):
             await app.set_chat_photo(chat_id, photo)
             os.remove(photo)
             await message.reply("✅ Фото группы обновлено!")
-            
-            await show_group_menu(
-                CallbackQuery(
-                    id="tmp",
-                    from_user=message.from_user,
-                    message=message,
-                    chat_instance="0",
-                    data=""
-                ), chat_id
-            )
+            await show_group_menu(callback, chat_id)
         except Exception as e:
             await message.reply(f"❌ Ошибка: {e}")
         
@@ -495,7 +455,6 @@ async def generate_link(client, callback: CallbackQuery):
     try:
         link = await app.create_chat_invite_link(chat_id, member_limit=1)
         
-        # Сохраняем ссылку для удаления через 10 минут
         group_links[chat_id] = {
             "link": link.invite_link,
             "time": datetime.now()
@@ -515,7 +474,6 @@ async def generate_link(client, callback: CallbackQuery):
         )
         await callback.answer()
         
-        # Запускаем таймер удаления
         asyncio.create_task(delete_link_after(chat_id))
         
     except Exception as e:
@@ -523,8 +481,7 @@ async def generate_link(client, callback: CallbackQuery):
 
 async def delete_link_after(chat_id: int):
     """Удаляет ссылку через 10 минут"""
-    await asyncio.sleep(600)  # 10 минут
-    
+    await asyncio.sleep(600)
     if chat_id in group_links:
         del group_links[chat_id]
         print(f"✅ Ссылка для {chat_id} удалена")
