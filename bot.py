@@ -1,7 +1,7 @@
 import os
 import asyncio
 from datetime import datetime
-from pyrogram import Client, filters, ChatMemberStatus  # <-- ИСПРАВЛЕНО
+from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 # ============= КОНФИГ =============
@@ -58,7 +58,8 @@ async def check_inactive_users():
                     async for member in app.get_chat_members(chat_id):
                         if member.user.is_bot:
                             continue
-                        if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                        # 0=создатель, 1=админ, 2=участник
+                        if member.status in [0, 1]:  # пропускаем админов и создателя
                             continue
                         last_seen = last_message_time.get(member.user.id)
                         if last_seen:
@@ -186,7 +187,7 @@ async def kick_menu(callback: CallbackQuery):
                 break
             if member.user.is_bot:
                 continue
-            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            if member.status in [0, 1]:  # создатель или админ
                 continue
             
             user = member.user
@@ -275,7 +276,7 @@ async def promote_menu(callback: CallbackQuery):
                 break
             if member.user.is_bot:
                 continue
-            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            if member.status in [0, 1]:  # создатель или админ
                 continue
             
             user = member.user
